@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Climate Cascade Sandbox</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  canvas { border-radius: 8px; }
+  .subsystem { border-left: 3px solid; padding-left: 8px; margin-bottom: 8px; }
+  .arrow { font-size: 10px; }
+</style>
+</head>
+<body class="bg-gray-950 text-white min-h-screen">
+<div class="max-w-5xl mx-auto p-4">
+  <h1 class="text-2xl font-bold text-center text-sky-400 mb-1">Climate Cascade Sandbox</h1>
+  <p class="text-center text-gray-400 text-sm mb-4">Adjust CO₂ and watch feedback loops ripple through interconnected climate systems</p>
+
+  <div class="flex flex-wrap gap-4 justify-center">
+    <div class="flex flex-col gap-3">
+      <canvas id="canvas" width="500" height="360" class="bg-gray-900"></canvas>
+      <div class="flex gap-3 justify-center">
+        <button onclick="toggleRun()" id="btn-run" class="bg-sky-700 hover:bg-sky-600 px-5 py-2 rounded-lg text-sm font-medium">Pause</button>
+        <button onclick="resetSim()" class="bg-gray-600 hover:bg-gray-500 px-5 py-2 rounded-lg text-sm">Reset</button>
+        <button onclick="triggerEvent('volcano')" class="bg-orange-700 hover:bg-orange-600 px-4 py-2 rounded-lg text-sm">🌋 Volcano</button>
+        <button onclick="triggerEvent('solar')" class="bg-yellow-700 hover:bg-yellow-600 px-4 py-2 rounded-lg text-sm">☀️ Solar Min</button>
+      </div>
+    </div>
+
+    <div class="flex flex-col gap-3 w-64">
+      <div class="bg-gray-800 rounded-xl p-4">
+        <h2 class="font-semibold text-sky-300 mb-3">Controls</h2>
+        <div class="space-y-3 text-sm">
+          <div>
+            <label class="flex justify-between"><span class="text-gray-300">CO₂ Emissions</span><span id="v-co2" class="text-orange-400">1.0×</span></label>
+            <input type="range" id="r-co2" min="0" max="40" value="10" class="w-full accent-orange-500">
+            <div class="text-xs text-gray-500 mt-0.5">Industrial emissions multiplier</div>
+          </div>
+          <div>
+            <label class="flex justify-between"><span class="text-gray-300">Deforestation</span><span id="v-defor" class="text-amber-400">0%</span></label>
+            <input type="range" id="r-defor" min="0" max="100" value="0" class="w-full accent-amber-500">
+          </div>
+          <div>
+            <label class="flex justify-between"><span class="text-gray-300">Ocean Acidification</span><span id="v-acid" class="text-blue-400">0%</span></label>
+            <input type="range" id="r-acid" min="0" max="100" value="0" class="w-full accent-blue-400">
+            <div class="text-xs text-gray-500 mt-0.5">Reduces ocean CO₂ absorption</div>
+          </div>
+          <div>
+            <label class="flex justify-between"><span class="text-gray-300">Methane Release</span><span id="v-meth" class="text-purple-400">0%</span></label>
+            <input type="range" id="r-meth" min="0" max="100" value="0" class="w-full accent-purple-500">
+            <div class="text-xs text-gray-500 mt-0.5">Permafrost thaw methane</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="bg-gray-800 rounded-xl p-4">
+        <h2 class="font-semibold text-sky-300 mb-3">Climate Systems</h2>
+        <div class="space-y-2 text-xs">
+          <div class="subsystem border-orange-500">
+            <div class="flex justify-between"><span class="text-orange-300">CO₂ (ppm)</span><span id="sys-co2" class="font-mono font-bold text-orange-400">415</span></div>
+          </div>
+          <div class="subsystem border-red-500">
+            <div class="flex justify-between"><span class="text-red-300">Temperature Δ (°C)</span><span id="sys-temp" class="font-mono font-bold text-red-400">+0.0</span></div>
+          </div>
+          <div class="subsystem border-blue-400">
+            <div class="flex justify-between"><span class="text-blue-300">Ice Cover (%)</span><span id="sys-ice" class="font-mono font-bold text-blue-400">100</span></div>
+          </div>
+          <div class="subsystem border-cyan-400">
+            <div class="flex justify-between"><span class="text-cyan-300">Sea Level Δ (cm)</span><span id="sys-sea" class="font-mono font-bold text-cyan-400">+0.0</span></div>
+          </div>
+          <div class="subsystem border-green-500">
+            <div class="flex justify-between"><span class="text-green-300">Ocean Heat (ZJ)</span><span id="sys-ocean" class="font-mono font-bold text-green-400">0</span></div>
+          </div>
+          <div class="subsystem border-purple-400">
+            <div class="flex justify-between"><span class="text-purple-300">Albedo</span><span id="sys-albedo" class="font-mono font-bold text-purple-400">0.30</span></div>
+          </div>
+          <div class="subsystem border-yellow-400">
+            <div class="flex justify-between"><span class="text-yellow-300">Year</span><span id="sys-year" class="font-mono font-bold text-yellow-400">2024</span></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="bg-gray-800 rounded-xl p-3">
+        <h2 class="font-semibold text-sky-300 mb-1 text-sm">Feedback Alerts</h2>
+        <div id="alerts" class="text-xs space-y-1 max-h-28 overflow-y-auto"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+const W = canvas.width, H = canvas.height;
+
+let running = true;
+let state = {};
+let year = 2024;
+let histCO2 = [], histTemp = [], histIce = [], histSea = [];
+
+function resetSim() {
+  state = { co2: 415, temp: 0, ice: 100, sea: 0, ocean: 0, albedo: 0.30, methane: 0.8 };
+  year = 2024;
+  histCO2 = [415]; histTemp = [0]; histIce = [100]; histSea = [0];
+}
+
+function getParam(id) { return parseInt(document.getElementById('r-'+id).value) / 10; }
+
+['co2','defor','acid','meth'].forEach(id => {
+  document.getElementById('r-'+id).addEventListener('input', function() {
+    const labels = { co2: ['v-co2', v => (v/10).toFixed(1)+'×'], defor: ['v-defor', v => v+'%'], acid: ['v-acid', v => v+'%'], meth: ['v-meth', v => v+'%'] };
+    const [elId, fmt] = labels[id];
+    document.getElementById(elId).textContent = fmt(this.value);
+  });
+});
+
+function triggerEvent(type) {
+  if (type === 'volcano') {
+    state.co2 += 50; state.temp += 0.3;
+    addAlert('🌋 Volcanic eruption! +50 CO₂ ppm, temporary cooling followed by warming');
+  } else if (type === 'solar') {
+    state.temp -= 0.5;
+    addAlert('☀️ Solar minimum: -0.5°C forcing for 10 years');
+  }
+}
+
+function addAlert(msg) {
+  const el = document.getElementById('alerts');
+  const d = document.createElement('div');
+  d.textContent = msg;
+  d.className = 'text-orange-300';
+  el.prepend(d);
+  while (el.children.length > 15) el.removeChild(el.lastChild);
+}
+
+let tick = 0;
+function simStep() {
+  if (!running) return;
+  tick++;
+  year += 0.1;
+
+  const co2Rate = getParam('co2');
+  const deforRate = getParam('defor') / 10;
+  const acidRate = getParam('acid') / 10;
+  const methRate = getParam('meth') / 10;
+
+  // CO2 dynamics
+  const co2Source = co2Rate * 3 + deforRate * 1.5 + state.methane * methRate * 2;
+  const co2Sink = (1 - acidRate * 0.008) * 2.5 * (1 - deforRate * 0.05);
+  state.co2 = Math.max(280, state.co2 + (co2Source - co2Sink) * 0.15);
+
+  // Methane (permafrost thaw above 2°C)
+  if (state.temp > 2) state.methane = Math.min(4, state.methane + 0.002 * state.temp);
+
+  // Temperature from CO2 (logarithmic forcing)
+  const co2Forcing = 3.7 * Math.log2(state.co2 / 415) * 0.8;
+  const iceAlbedoFeedback = (1 - state.ice/100) * 0.8;
+  const targetTemp = co2Forcing + iceAlbedoFeedback + state.methane * methRate * 0.3;
+  state.temp += (targetTemp - state.temp) * 0.02;
+
+  // Ice cover (ice melts above 0.5°C)
+  if (state.temp > 0.5) state.ice = Math.max(0, state.ice - state.temp * 0.05);
+  else if (state.temp < 0) state.ice = Math.min(100, state.ice + 0.02);
+
+  // Albedo from ice
+  state.albedo = 0.14 + (state.ice / 100) * 0.16;
+
+  // Ocean heat
+  state.ocean += state.temp * 0.5 - (1 - acidRate*0.01) * 0.1;
+  state.ocean = Math.max(0, state.ocean);
+
+  // Sea level from ice melt + thermal expansion
+  state.sea = (100 - state.ice) * 0.8 + state.temp * 2;
+
+  // Tipping point alerts
+  if (tick % 50 === 0) {
+    if (state.temp > 1.5) addAlert(`${year.toFixed(0)}: ⚠️ 1.5°C threshold exceeded (Paris target breach)`);
+    if (state.temp > 2.0 && tick % 100 === 0) addAlert(`${year.toFixed(0)}: 🚨 2°C — Arctic ice gone, permafrost methane cascade`);
+    if (state.ice < 20) addAlert(`${year.toFixed(0)}: 🧊 Ice critically low (${state.ice.toFixed(0)}%) — albedo flip`);
+    if (state.co2 > 560) addAlert(`${year.toFixed(0)}: CO₂ doubled from pre-industrial levels`);
+  }
+
+  histCO2.push(state.co2); histTemp.push(state.temp); histIce.push(state.ice); histSea.push(state.sea);
+  if (histCO2.length > 300) { histCO2.shift(); histTemp.shift(); histIce.shift(); histSea.shift(); }
+
+  updateDisplay();
+}
+
+function updateDisplay() {
+  document.getElementById('sys-co2').textContent = state.co2.toFixed(0);
+  document.getElementById('sys-temp').textContent = (state.temp >= 0 ? '+' : '') + state.temp.toFixed(2);
+  document.getElementById('sys-ice').textContent = state.ice.toFixed(1);
+  document.getElementById('sys-sea').textContent = '+' + state.sea.toFixed(1);
+  document.getElementById('sys-ocean').textContent = state.ocean.toFixed(0);
+  document.getElementById('sys-albedo').textContent = state.albedo.toFixed(3);
+  document.getElementById('sys-year').textContent = year.toFixed(0);
+}
+
+function drawFrame() {
+  ctx.fillStyle = '#030712';
+  ctx.fillRect(0, 0, W, H);
+
+  // Earth visualization
+  const cx = W/2, cy = H/2 - 20;
+  const r = 110;
+
+  // Ocean (temperature colored)
+  const tempFrac = Math.min(1, Math.max(0, state.temp / 5));
+  const oceanR = Math.floor(20 + tempFrac * 235);
+  const oceanB = Math.floor(180 - tempFrac * 170);
+  ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI*2);
+  ctx.fillStyle = `rgb(${oceanR},60,${oceanB})`; ctx.fill();
+
+  // Land (green->brown with deforestation)
+  const defFrac = getParam('defor') / 10;
+  const landG = Math.floor(120 - defFrac * 80);
+  const landR = Math.floor(60 + defFrac * 80);
+  ctx.save(); ctx.clip();
+  ctx.fillStyle = `rgb(${landR},${landG},40)`;
+  ctx.fillRect(cx - r*0.6, cy - r*0.5, r*1.2, r*0.4);
+  ctx.fillRect(cx - r*0.3, cy + r*0.1, r*0.7, r*0.35);
+  ctx.restore();
+
+  // Ice caps
+  const iceAlpha = state.ice / 100;
+  ctx.globalAlpha = iceAlpha;
+  ctx.fillStyle = '#e0f2fe';
+  ctx.beginPath(); ctx.arc(cx, cy - r*0.7, r*0.35 * iceAlpha, 0, Math.PI*2); ctx.fill();
+  ctx.beginPath(); ctx.arc(cx, cy + r*0.7, r*0.25 * iceAlpha, 0, Math.PI*2); ctx.fill();
+  ctx.globalAlpha = 1;
+
+  // Atmosphere glow (CO2)
+  const co2Frac = Math.min(1, (state.co2 - 280) / 400);
+  const grad = ctx.createRadialGradient(cx, cy, r, cx, cy, r+30);
+  grad.addColorStop(0, `rgba(255,${Math.floor(150-co2Frac*100)},0,${0.15 + co2Frac*0.25})`);
+  grad.addColorStop(1, 'transparent');
+  ctx.fillStyle = grad; ctx.beginPath(); ctx.arc(cx, cy, r+30, 0, Math.PI*2); ctx.fill();
+
+  // Sea level indicator
+  const seaH = Math.min(50, state.sea);
+  if (seaH > 1) {
+    ctx.fillStyle = `rgba(0,150,255,0.3)`;
+    ctx.fillRect(cx + r - 10, cy + r - seaH, 12, seaH);
+    ctx.fillStyle = '#60a5fa';
+    ctx.fillRect(cx + r - 10, cy + r - seaH, 12, 2);
+    ctx.font = '9px sans-serif'; ctx.fillStyle = '#93c5fd';
+    ctx.fillText(`+${state.sea.toFixed(0)}cm`, cx + r - 10, cy + r - seaH - 3);
+  }
+
+  // Charts at bottom
+  drawMiniChart(5, H-75, 160, 65, histCO2, '#f97316', 280, 800, 'CO₂ ppm');
+  drawMiniChart(175, H-75, 160, 65, histTemp, '#ef4444', -1, 5, 'Temp Δ°C');
+  drawMiniChart(345, H-75, 150, 65, histIce, '#93c5fd', 0, 100, 'Ice %');
+}
+
+function drawMiniChart(gx, gy, gw, gh, data, color, min, max, label) {
+  ctx.fillStyle = 'rgba(0,0,0,0.5)'; ctx.fillRect(gx, gy, gw, gh);
+  ctx.fillStyle = '#6b7280'; ctx.font = '9px sans-serif';
+  ctx.fillText(label, gx+3, gy+10);
+  if (data.length < 2) return;
+  const recent = data.slice(-100);
+  const range = max - min || 1;
+  ctx.strokeStyle = color; ctx.lineWidth = 1.5; ctx.beginPath();
+  recent.forEach((v, i) => {
+    const x = gx + (i/recent.length)*gw;
+    const y = gy + gh - ((v-min)/range)*gh*0.85 - 3;
+    i===0 ? ctx.moveTo(x,y) : ctx.lineTo(x,y);
+  });
+  ctx.stroke();
+  const last = recent[recent.length-1];
+  ctx.fillStyle = color; ctx.font = '10px monospace';
+  ctx.fillText(last.toFixed(1), gx+gw-35, gy+10);
+}
+
+function toggleRun() {
+  running = !running;
+  document.getElementById('btn-run').textContent = running ? 'Pause' : 'Resume';
+}
+
+resetSim();
+setInterval(simStep, 80);
+setInterval(() => { drawFrame(); }, 50);
+</script>
+</body>
+</html>
